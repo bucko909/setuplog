@@ -1,0 +1,167 @@
+cat <<END > /etc/apt/preferences.d/defaultrelease
+Package: *
+Pin: release a=stable
+Pin-Priority: 451
+
+Package: *
+Pin: release a=testing
+Pin-Priority: 403
+END
+
+cat <<END > /etc/apt/preferences.d/extras
+Package: zsh
+Pin: release a=testing
+Pin-Priority: 892
+
+Package: postgresql-* libpq5 logrotate zlib1g libgssapi-krb5-* libk5crypto* libkrb5*
+Pin: release a=testing
+Pin-Priority: 893
+
+Package: gitolite gitweb git git-daemon-run
+Pin: release a=testing
+Pin-Priority: 894
+END
+
+adduser bucko
+
+vim /etc/default/locale
+apt-get install locales
+vim /etc/locale.gen # en_GB.UTF-8
+locale-gen
+
+apt-get install host whois dig nginx postgresql-9.1 locales screen bzip2 ncdu dc htop
+
+apt-get install exim4 apache2-utils
+dpkg-reconfigure exim4-config
+/usr/share/doc/exim4-base/examples/exim-gencert
+vim /etc/exim4/conf.d/auth/30_exim4-config_examples # enable auth
+htpasswd -nd bucko > /etc/exim4/passwd
+# same password in cirno's /etc/exim4/passwd.client
+echo MAIN_TLS_ENABLE = true > /etc/exim4/conf.d/main/00_local_settings
+cat > /etc/exim4/conf.d/router/101_exim4-config_bucko_domains <<END
+### Some things
+
+bucko_domains:
+  debug_print = "R: bucko_domains for $local_part@$domain"
+  domains = abhor.co.uk : disambiguate.co.uk : houseofanime.co.uk : nullify.co.uk : androgynous.co.uk : disillusionment.co.uk : incumbent.co.uk : prehensible.co.uk : avaricious.co.uk : bucko.me.uk : fluorescence.co.uk : kgsclans.co.uk : cirno.co.uk
+  driver = accept
+  transport = procmail_pipe_bucko
+
+END
+
+cat > /etc/exim4/conf.d/transport/31_exim4-config_procmail_pipe_bucko <<END
+procmail_pipe_bucko:
+  debug_print = "T: procmail_pipe_bucko for $local_part@$domain"
+  driver = pipe 
+  user = bucko
+  path = "/bin:/usr/bin:/usr/local/bin" 
+  command = "/usr/bin/procmail -d bucko"
+  return_path_add
+  delivery_date_add
+  envelope_to_add
+
+END
+update-exim4.conf
+service exim4 restart
+
+apt-get install bind9
+vim /etc/bind/named.conf.options # allow-transfer { 137.205.210.240; 137.205.37.250; 89.16.166.19; }; // Codd, Backus, Goggins
+scp -r bucko@abhor.co.uk:/etc/bind/db /etc/bind
+cat > /etc/bind/rndc.key # from old machine
+service bind9 restart
+
+copy .procmailrc bin/whitelist-test .mail.*list to ~bucko
+apt-get install spamassassin razor procmail
+
+# BE SURE TO MAKE SURE MAIL GOES TO A VALID SPOT.
+
+apt-get install dovecot-imapd
+vim /etc/dovecot/dovecot.conf # protocols imaps; disable_plaintext_auth = yes; ssl = required; set passwd-file and add {plain} password. Set mail_location.
+
+apt-get install munin
+munin-node-configure
+mkdir /var/www
+cd /var/www
+chown root:www-data .
+ln -s /var/cache/munin/www/ munin
+
+apt-get install sudo
+adduser bucko sudo
+
+apt-get install fail2ban
+
+
+vim /etc/ssh/sshd_config # Port -> 742
+service ssh restart
+
+apt-get install apticron
+
+apt-get install gitweb git-daemon-run
+
+
+
+
+
+
+git filter-branch --index-filter 'git rm --cached --ignore-unmatch filename' HEAD
+git filter-branch -f --index-filter 'ls "../../Documents Mine"|grep -v "house finance"|while read I; do git rm -r "Documents Mine/$I"; echo; done' HEAD
+git filter-branch --subdirectory-filter ABC HEAD
+
+git reset --hard
+rm -rf .git/refs/original/
+git reflog expire --expire=now --all
+git gc --aggressive --prune=now
+
+
+
+pg_dump and tar up ~amiami
+createuser/createdb amiami then import
+apt-get install fcgiwrap
+make /etc/init.d/fcgiwrap-amiami (DAEMONUSER -> amiami)
+
+apt-get install python-psycopg2 python-lxml
+
+apt-get install quota quotatool
+vim /etc/fstab # add ,usrquota
+quotaoff ---all
+quotacheck --all --no-remount
+quotaon --all
+edquota -u amiami
+...
+
+
+# REPO
+adduser repo
+adduser repo-grab
+apt-get install libdbd-pg-perl libpoe-component-irc-perl libpoe-perl perlmagick libio-socket-ssl-perl xvfb cutycapt
+apt-get install libnet-amazon-s3-perl libfile-homedir-perl libgetopt-argvfile-perl # Seriously?!
+# Do whatever shit needs doing to import psql stuff
+su - repo
+mkdir -p public_html/{thumbs,images} tempstor
+lambyxen$ rsync -a -v --progress public_html/{thumbs,images} elmonstro:public_html
+make /etc/init.d/fcgiwrap-repo (DAEMONUSER -> repo)
+git clone ...
+ln -s repo/bin bin
+echo 'export PATH="$PATH:$HOME/bin"' >> .bashrc
+cd public_html
+ln -s ../repo/public_html/* .
+
+
+
+# gitolite / gitweb
+sudo apt-get install gitolite gitweb
+sudo dpkg-reconfigure gitolite
+# Paste in key
+# Set up keys/repos
+sudo chmod 644 ~gitolite/projects.list
+sudo chmod -R a+rX ~gitolite/repositories/
+ln -s ../../usr/share/gitweb /var/www/
+# Add nginx file for gitweb
+# edit projects.list -> /var/lib/gitolite/projects.list and repos -> /var/lib/gitolite/repositories in /etc/gitweb.conf
+git clone gitolite@$HOSTNAME:gitolite-admin
+cd gitolite-admin
+for I in $(ls ../git/|cut -d. -f1); do printf "\nrepo\t$I\n\tRW+\t=   @bucko\n\tR\t=   @all\n\tR\t=   gitweb\n"; done >> conf/projects.list
+# fixup perms
+for I in $(ls |cut -d. -f1); do git --git-dir=$I.git remote add origin gitolite@elmonstro:$I; git --git-dir=$I.git push --all; done
+
+
