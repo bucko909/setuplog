@@ -1,0 +1,4 @@
+# systemd
+apt-get install systemd
+apt-get install systemd-sysv
+reboot

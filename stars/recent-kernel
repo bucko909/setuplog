@@ -1,0 +1,6 @@
+# recent-kernel
+apt-get -t wheezy-backports install linux-image-amd64
+apt-get install libblkid-dev liblzo2-dev
+mv /etc/grub.d/06_OVHkernel /root
+dpkg-reconfigure grub-pc
+reboot

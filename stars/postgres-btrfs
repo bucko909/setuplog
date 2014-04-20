@@ -1,0 +1,8 @@
+# postgresql-with-subvolume
+# provides: postgresql
+# requires: btrfs-backups
+apt-get install postgresql-9.1 postgresql-client
+service postgresql stop
+# BEGIN ZVEZDA ONLY
+btrfs-add /var/lib/postgresql
+# END ZVEZDA ONLY

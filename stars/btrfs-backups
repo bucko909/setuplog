@@ -1,0 +1,61 @@
+# btrfs-backups
+# requires: recent-kernel recent-btrfs
+apt-get install btrfs-tools
+mkdir /root/bin
+cat <<END > /root/bin/btrfs_recv_only
+#!/bin/sh
+
+case "$SSH_ORIGINAL_COMMAND" in
+		"btrfs receive /btrfs-snapshots/"*_*/)
+				exec $SSH_ORIGINAL_COMMAND
+				;;
+		*)
+				echo "$0: Invalid command: $SSH_ORIGINAL_COMMAND"
+				exit 1
+				;;
+esac
+END
+chmod 755 /root/bin/btrfs_recv_only
+mkdir /root/.ssh
+chmod 700 /root/.ssh
+ssh-keygen -t rsa -f /root/.ssh/btrfs-send -N ''
+# TODO MANUAL
+# echo 'command="/root/bin/btrfs_recv_only"' "$(ssh root@$OTHER cat .ssh/btrfs-send.pub)" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+cat <<END > /root/bin/btrfs-push
+#!/bin/sh
+set -e
+set -x
+ls /btrfs-snapshots/ | \
+		while read f; do
+				d="$(echo $f | tr _ /)"
+				t=/btrfs-snapshots/"$f"/"$(date +%Y%m%d-%H%M%S)"
+				echo "$f" "$d" "$t"
+				btrfs subvolume snapshot -r "/$d" "$t"
+				echo "snapped"
+				if btrfs send -p "$(readlink /btrfs-snapshots/"$f"/CURRENT)" "$t" | ssh -i /root/.ssh/btrfs-send root@kiraboshi.bucko.me.uk btrfs receive /btrfs-snapshots/"$f"/; then
+						rm /btrfs-snapshots/"$f"/CURRENT
+						ln -s "$t" /btrfs-snapshots/"$f"/CURRENT
+				fi
+				echo "done"
+		done
+END
+chmod 700 /root/bin/btrfs-push
+
+cat <<END > /root/bin/btrfs-add
+#!/bin/sh
+set -e
+set -x
+d="$(echo "$1" | sed 's|^/||')"
+mv /"$d"{,-tmp}
+btrfs subvolume create /"$d"
+mv /"$d"-tmp/{,.}* /"$d" || true # We'll catch errors when we try to rename, anyway
+rmdir /"$d"-tmp
+f="$(echo "$d" | tr / _)"
+mkdir /btrfs-snapshots/"$f"
+t=/btrfs-snapshots/"$f"/"$(date +%Y%m%d-%H%M%S)"
+btrfs subvolume snapshot -r "/$d" "$t"
+btrfs send "$t" | ssh -i /root/.ssh/btrfs-send root@kiraboshi.bucko.me.uk btrfs receive /btrfs-snapshots/"$f"/
+ln -s "$t" /btrfs-snapshots/"$f"/CURRENT
+END
+chmod 700 /root/bin/btrfs-add

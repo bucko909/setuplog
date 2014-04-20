@@ -1,0 +1,27 @@
+# bind9
+# requires: btrfs-backups
+apt-get install bind9
+
+# BEGIN ZVEZDA ONLY
+btrfs-add /etc/bind
+# Copy config
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/named.conf.local /etc/bind
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/db /etc/bind
+
+vim /etc/bind/named.conf.options # Add below
+#        allow-transfer {
+#                192.95.26.74; # kiraboshi
+#                213.251.187.86; # zvezda
+#        };
+# Also, s/addresses/any/ for listen{} stanzas
+# END ZVEZDA ONLY
+# BEGIN KIRABOSHI ONLY
+vim /etc/bind/named.conf.options # Add below
+#        allow-notify { 213.251.187.86; };
+# Also, s/addresses/any/ for listen{} stanzas
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/named.conf.local /etc/bind
+# replace master -> slave.
+# replace file "" -> allow-update { 213.251.187.86; }
+# END KIRABOSHI ONLY
+service bind9 restart
+

@@ -1,0 +1,110 @@
+# repo
+# requires: nginx postgresql
+apt-get install libdbd-pg-perl libpoe-component-irc-perl libpoe-perl perlmagick libio-socket-ssl-perl xvfb cutycapt libnet-amazon-s3-perl libfile-homedir-perl libgetopt-argvfile-perl imagemagick
+adduser repo
+adduser repo-grab
+
+apt-get install fcgiwrap
+sed 's/DAEMONUSER="\$FCGI_USER"/DAEMONUSER=repo/;/# Provides/s/fcgiwrap/fcgiwrap-repo/;s/NAME="fcgiwrap"/NAME="fcgiwrap-repo"/;/^FCGI_\(USER\|GROUP\)/s/www-data/repo/' /etc/init.d/fcgiwrap > /etc/init.d/fcgiwrap-repo
+chmod 755 /etc/init.d/fcgiwrap-repo
+update-rc.d fcgiwrap-repo defaults
+service fcgiwrap-repo start
+
+# BEGIN ZVEZDA ONLY
+cd /home
+mv repo repo-tmp
+btrfs subvolume create repo
+chown repo:repo repo
+mv repo-tmp/{.,}* repo
+rmdir repo-tmp
+mkdir ~repo/.ssh/
+cp ~/.ssh/authorized_keys ~repo/.ssh/authorized_keys
+chown -R repo:repo ~repo
+ssh -A repo@elmonstro rsync -a --progress -v --exclude=images --exclude=thumbs bin public_html repo repo@zvezda.bucko.me.uk: # FIXME
+sudo -u postgres createdb repo
+sudo -u postgres createuser repo
+sudo -u postgres psql -c 'grant all on database repo to repo'
+ssh repo@elmonstro pg_dump | bzip2 -c | ssh repo@zvezda.bucko.me.uk 'bzip2 -cd | psql' # FIXME
+ssh -A repo@elmonstro rsync -a --progress -v --exclude=images --exclude=thumbs bin public_html repo repo@zvezda.bucko.me.uk:
+# END ZVEZDA ONLY
+
+cat <<END > /etc/nginx/sites-available/repo
+server {
+
+		listen   80; ## listen for ipv4
+
+		server_name  abhor.co.uk;
+
+		access_log  /home/repo/log/access.log;
+
+		location / {
+				root   /home/repo/public_html;
+				index  index.pl;
+		}
+
+		#error_page  404  /404.html;
+
+		# redirect server error pages to the static page /50x.html
+		#
+		#error_page   500 502 503 504  /50x.html;
+		#location = /50x.html {
+		#       root   /var/www/nginx-default;
+		#}
+
+		location ~ \.pl$ {
+				fastcgi_pass   unix:/var/run/fcgiwrap-repo.socket;
+				fastcgi_index  index.pl;
+				fastcgi_param SCRIPT_FILENAME /home/repo/public_html$fastcgi_script_name;
+				fastcgi_param QUERY_STRING     $query_string;
+				fastcgi_param REQUEST_METHOD   $request_method;
+				fastcgi_param CONTENT_TYPE     $content_type;
+				fastcgi_param CONTENT_LENGTH   $content_length;
+				fastcgi_param GATEWAY_INTERFACE  CGI/1.1;
+				fastcgi_param SERVER_SOFTWARE    nginx;
+				fastcgi_param SCRIPT_NAME        $fastcgi_script_name;
+				fastcgi_param REQUEST_URI        $request_uri;
+				fastcgi_param DOCUMENT_URI       $document_uri;
+				fastcgi_param DOCUMENT_ROOT      /home/repo/public_html;
+				fastcgi_param SERVER_PROTOCOL    $server_protocol;
+				fastcgi_param REMOTE_ADDR        $remote_addr;
+				fastcgi_param REMOTE_PORT        $remote_port;
+				fastcgi_param SERVER_ADDR        $server_addr;
+				fastcgi_param SERVER_PORT        $server_port;
+				fastcgi_param SERVER_NAME        $server_name;
+		}
+}
+END
+ln -s ../sites-available/repo /etc/nginx/sites-enabled/
+service nginx reload
+
+cat <<END /etc/sudoers.d/repo-grab
+repo    ALL=(repo-grab) NOPASSWD: ALL
+END
+chmod 600 /etc/sudoers.d/repo-grab
+
+mkdir /home/repo-grab/bin
+cat <<END > /home/repo-grab/bin/cutycapt
+#!/bin/bash
+
+ulimit -t 30
+ulimit -m 400
+ulimit -f 102400
+/usr/bin/cutycapt "$@"
+END
+chmod 755 /home/repo-grab/bin/cutycapt
+chown repo-grab:repo-grab /home/repo-grab/bin/cutycapt /home/repo-grab/bin
+
+cat <<END > /tmp/cron
+@reboot cd /home/repo/repo; sleep 60; ./startscreen
+* * * * * cd /home/repo/repo; ./startscreen
+*/5 * * * * sudo -u repo-grab killall xvfb-run Xvfb 2> /dev/null
+47 19 * * * /home/repo/repo/db_dump.sh
+END
+
+mkdir /var/log/repo
+chown repo:repo /var/log/repo
+ln -s /lib/systemd/system/user@.service /etc/systemd/system/multi-user.target.wants/user@repo.service
+
+mkdir ~repo/.config
+ln -s ../repo/systemd ~repo/.config
+chown repo:repo -R ~repo/.config
