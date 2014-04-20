@@ -1,0 +1,319 @@
+# root password
+# ssh auth keys
+adduser bucko
+apt-get install sudo
+
+# systemd
+apt-get install systemd
+apt-get install systemd-sysv
+reboot
+
+# tolerable-utilities
+apt-get install vim htop less git
+
+# SSL
+# openssl req -newkey rsa:4096 -subj /CN=zvezda.bucko.me.uk -nodes -keyout example_key.pem -out example_csr.pem
+# cat example_csr.pem 
+# signed_cert.pem
+# cat > signed_cert.pem
+
+# postgresql-with-subvolume
+# provides: postgresql
+apt-get install postgresql-9.1 postgresql-client
+service postgresql stop
+cd /var/lib
+# BEGIN ZVEZDA ONLY
+mv postgresql/ postgresql-tmp
+btrfs subvolume create postgresql
+mv postgresql-tmp/* postgresql
+rmdir postgresql-tmp/
+# END ZVEZDA ONLY
+
+# nginx
+apt-get install nginx
+
+# backport kernel
+apt-get -t wheezy-backports install linux-image-amd64
+apt-get install libblkid-dev liblzo2-dev
+mv /etc/grub.d/06_OVHkernel /root
+dpkg-reconfigure grub-pc
+reboot
+
+
+apt-get build-dep btrfs-tools
+git clone git://git.kernel.org/pub/scm/linux/kernel/git/mason/btrfs-progs.git
+cd btrfs-progs
+make -j4
+
+
+
+# repo
+# requires: nginx postgresql
+apt-get install libdbd-pg-perl libpoe-component-irc-perl libpoe-perl perlmagick libio-socket-ssl-perl xvfb cutycapt libnet-amazon-s3-perl libfile-homedir-perl libgetopt-argvfile-perl imagemagick
+adduser repo
+adduser repo-grab
+
+apt-get install fcgiwrap
+sed 's/DAEMONUSER="\$FCGI_USER"/DAEMONUSER=repo/;/# Provides/s/fcgiwrap/fcgiwrap-repo/;s/NAME="fcgiwrap"/NAME="fcgiwrap-repo"/;/^FCGI_\(USER\|GROUP\)/s/www-data/repo/' /etc/init.d/fcgiwrap > /etc/init.d/fcgiwrap-repo
+chmod 755 /etc/init.d/fcgiwrap-repo
+update-rc.d fcgiwrap-repo defaults
+service fcgiwrap-repo start
+
+# BEGIN ZVEZDA ONLY
+cd /home
+mv repo repo-tmp
+btrfs subvolume create repo
+chown repo:repo repo
+mv repo-tmp/{.,}* repo
+rmdir repo-tmp
+mkdir ~repo/.ssh/
+cp ~/.ssh/authorized_keys ~repo/.ssh/authorized_keys
+chown -R repo:repo ~repo
+ssh -A repo@elmonstro rsync -a --progress -v --exclude=images --exclude=thumbs bin public_html repo repo@zvezda.bucko.me.uk: # FIXME
+sudo -u postgres createdb repo
+sudo -u postgres createuser repo
+sudo -u postgres psql -c 'grant all on database repo to repo'
+ssh repo@elmonstro pg_dump | bzip2 -c | ssh repo@zvezda.bucko.me.uk 'bzip2 -cd | psql' # FIXME
+ssh -A repo@elmonstro rsync -a --progress -v --exclude=images --exclude=thumbs bin public_html repo repo@zvezda.bucko.me.uk:
+# END ZVEZDA ONLY
+
+cat <<END > /etc/nginx/sites-available/repo
+server {
+
+        listen   80; ## listen for ipv4
+
+        server_name  abhor.co.uk;
+
+        access_log  /home/repo/log/access.log;
+
+        location / {
+                root   /home/repo/public_html;
+                index  index.pl;
+        }
+
+        #error_page  404  /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        #error_page   500 502 503 504  /50x.html;
+        #location = /50x.html {
+        #       root   /var/www/nginx-default;
+        #}
+
+        location ~ \.pl$ {
+                fastcgi_pass   unix:/var/run/fcgiwrap-repo.socket;
+                fastcgi_index  index.pl;
+                fastcgi_param SCRIPT_FILENAME /home/repo/public_html$fastcgi_script_name;
+                fastcgi_param QUERY_STRING     $query_string;
+                fastcgi_param REQUEST_METHOD   $request_method;
+                fastcgi_param CONTENT_TYPE     $content_type;
+                fastcgi_param CONTENT_LENGTH   $content_length;
+                fastcgi_param GATEWAY_INTERFACE  CGI/1.1;
+                fastcgi_param SERVER_SOFTWARE    nginx;
+                fastcgi_param SCRIPT_NAME        $fastcgi_script_name;
+                fastcgi_param REQUEST_URI        $request_uri;
+                fastcgi_param DOCUMENT_URI       $document_uri;
+                fastcgi_param DOCUMENT_ROOT      /home/repo/public_html;
+                fastcgi_param SERVER_PROTOCOL    $server_protocol;
+                fastcgi_param REMOTE_ADDR        $remote_addr;
+                fastcgi_param REMOTE_PORT        $remote_port;
+                fastcgi_param SERVER_ADDR        $server_addr;
+                fastcgi_param SERVER_PORT        $server_port;
+                fastcgi_param SERVER_NAME        $server_name;
+        }
+}
+END
+ln -s ../sites-available/repo /etc/nginx/sites-enabled/
+service nginx reload
+
+cat <<END /etc/sudoers.d/repo-grab
+repo    ALL=(repo-grab) NOPASSWD: ALL
+END
+chmod 600 /etc/sudoers.d/repo-grab
+
+mkdir /home/repo-grab/bin
+cat <<END > /home/repo-grab/bin/cutycapt
+#!/bin/bash
+
+ulimit -t 30
+ulimit -m 400
+ulimit -f 102400
+/usr/bin/cutycapt "$@"
+END
+chmod 755 /home/repo-grab/bin/cutycapt
+chown repo-grab:repo-grab /home/repo-grab/bin/cutycapt /home/repo-grab/bin
+
+cat <<END > /tmp/cron
+@reboot cd /home/repo/repo; sleep 60; ./startscreen
+* * * * * cd /home/repo/repo; ./startscreen
+*/5 * * * * sudo -u repo-grab killall xvfb-run Xvfb 2> /dev/null
+47 19 * * * /home/repo/repo/db_dump.sh
+END
+
+mkdir /var/log/repo
+chown repo:repo /var/log/repo
+ln -s /lib/systemd/system/user@.service /etc/systemd/system/multi-user.target.wants/user@repo.service
+
+mkdir ~repo/.config
+ln -s ../repo/systemd ~repo/.config
+chown repo:repo -R ~repo/.config
+
+
+
+
+# btrfs backups
+mkdir /root/bin
+cat <<END > /root/bin/btrfs_recv_only
+#!/bin/sh
+
+case "$SSH_ORIGINAL_COMMAND" in
+        "btrfs receive /btrfs-snapshots/"*_*/)
+                exec $SSH_ORIGINAL_COMMAND
+                ;;
+        *)
+                echo "$0: Invalid command: $SSH_ORIGINAL_COMMAND"
+                exit 1
+                ;;
+esac
+END
+chmod 755 /root/bin/btrfs_recv_only
+mkdir /root/.ssh
+chmod 700 /root/.ssh
+ssh-keygen -t rsa -f /root/.ssh/btrfs-send -N ''
+# TODO MANUAL
+# echo 'command="/root/bin/btrfs_recv_only"' "$(ssh root@$OTHER cat .ssh/btrfs-send.pub)" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+cat <<END > /root/bin/btrfs-push
+#!/bin/sh
+set -e
+set -x
+ls /btrfs-snapshots/ | \
+        while read f; do
+                d="$(echo $f | tr _ /)"
+                t=/btrfs-snapshots/"$f"/"$(date +%Y%m%d-%H%M%S)"
+                echo "$f" "$d" "$t"
+                btrfs subvolume snapshot -r "/$d" "$t"
+                echo "snapped"
+                if btrfs send -p "$(readlink /btrfs-snapshots/"$f"/CURRENT)" "$t" | ssh -i /root/.ssh/btrfs-send root@kiraboshi.bucko.me.uk btrfs receive /btrfs-snapshots/"$f"/; then
+                        rm /btrfs-snapshots/"$f"/CURRENT
+                        ln -s "$t" /btrfs-snapshots/"$f"/CURRENT
+                fi
+                echo "done"
+        done
+END
+chmod 700 /root/bin/btrfs-push
+
+cat <<END > /root/bin/btrfs-add
+#!/bin/sh
+set -e
+set -x
+d="$(echo "$1" | sed 's|^/||')"
+mv /"$d"{,-tmp}
+btrfs subvolume create /"$d"
+mv /"$d"-tmp/{,.}* /"$d" || true # We'll catch errors when we try to rename, anyway
+rmdir /"$d"-tmp
+f="$(echo "$d" | tr / _)"
+mkdir /btrfs-snapshots/"$f"
+t=/btrfs-snapshots/"$f"/"$(date +%Y%m%d-%H%M%S)"
+btrfs subvolume snapshot -r "/$d" "$t"
+btrfs send "$t" | ssh -i /root/.ssh/btrfs-send root@kiraboshi.bucko.me.uk btrfs receive /btrfs-snapshots/"$f"/
+ln -s "$t" /btrfs-snapshots/"$f"/CURRENT
+END
+chmod 700 /root/bin/btrfs-add
+
+
+# DNS
+apt-get install bind9
+
+# (make subvolume)
+cd /etc
+mv bind bind-tmp
+btrfs subvolume create bind
+mv bind-tmp/* bind
+rmdir bind-tmp
+
+# BEGIN ZVEZDA ONLY
+# Copy config
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/named.conf.local /etc/bind
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/db /etc/bind
+
+vim /etc/bind/named.conf.options # Add below
+#        allow-transfer {
+#                192.95.26.74; # kiraboshi
+#                213.251.187.86; # zvezda
+#        };
+# Also, s/addresses/any/ for listen{} stanzas
+# END ZVEZDA ONLY
+# BEGIN KIRABOSHI ONLY
+vim /etc/bind/named.conf.options # Add below
+#        allow-notify { 213.251.187.86; };
+# Also, s/addresses/any/ for listen{} stanzas
+scp -o 'Port 742' -r bucko@abhor.co.uk:/etc/bind/named.conf.local /etc/bind
+# replace master -> slave.
+# replace file "" -> allow-update { 213.251.187.86; }
+# END KIRABOSHI ONLY
+service bind9 restart
+
+
+# git
+apt-get install gitolite gitweb
+dpkg-reconfigure gitolite
+# ZVEZDA ONLY
+# Paste in key
+btrfs-add /var/lib/gitolite
+# (copy in repos was a bit of a pain due to permissions!)
+sudo chmod 644 ~gitolite/projects.list
+# END ZVEZDA ONLY
+mkdir -p /var/www
+chgrp www-data /var/www
+ln -s ../../usr/share/gitweb /var/www/
+sed -i '/^\$projectroot /s|".*"|"/var/lib/gitolite/repositories"|;/^\#\?\$projects_list /s|.*|$projects_list = "$projectroot/../projects.list";|' /etc/gitweb.conf 
+cat <<END > /etc/nginx/sites-available/gitweb
+server {
+
+        server_name  gitweb.abhor.co.uk;
+
+        access_log  /var/log/nginx/gitweb-access.log;
+
+        location / {
+                root   /var/www/gitweb;
+                index  index.cgi;
+        }
+
+        #error_page  404  /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        #error_page   500 502 503 504  /50x.html;
+        #location = /50x.html {
+        #       root   /var/www/nginx-default;
+        #}
+
+        location ~ \.cgi$ {
+                fastcgi_pass   unix:/var/run/fcgiwrap.socket;
+                fastcgi_index  index.cgi;
+                fastcgi_param SCRIPT_FILENAME $fastcgi_script_name;
+                fastcgi_param QUERY_STRING     $query_string;
+                fastcgi_param REQUEST_METHOD   $request_method;
+                fastcgi_param CONTENT_TYPE     $content_type;
+                fastcgi_param CONTENT_LENGTH   $content_length;
+                fastcgi_param GATEWAY_INTERFACE  CGI/1.1;
+                fastcgi_param SERVER_SOFTWARE    nginx;
+                fastcgi_param SCRIPT_NAME        $fastcgi_script_name;
+                fastcgi_param REQUEST_URI        $request_uri;
+                fastcgi_param DOCUMENT_URI       $document_uri;
+                fastcgi_param DOCUMENT_ROOT      /var/www/gitweb;
+                fastcgi_param SERVER_PROTOCOL    $server_protocol;
+                fastcgi_param REMOTE_ADDR        $remote_addr;
+                fastcgi_param REMOTE_PORT        $remote_port;
+                fastcgi_param SERVER_ADDR        $server_addr;
+                fastcgi_param SERVER_PORT        $server_port;
+                fastcgi_param SERVER_NAME        $server_name;
+        }
+}
+END
+ln -s ../site-available/gitweb /etc/nginx/sites-enabled
+service nginx restart
+adduser www-data gitolite
+service fcgiwrap restart
+
