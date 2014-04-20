@@ -3,16 +3,20 @@
 adduser bucko
 apt-get install sudo
 
+# sensible-system
+apt-get install fail2ban apticron etckeeper
+
 # tolerable-utilities
-apt-get install vim htop less git
+apt-get install vim htop less git host whois dnsutils screen bzip2 ncdu dc
+
+# timezone (UTC)
+dpkg-reconfigure tzdata
 
 # SSL
 # openssl req -newkey rsa:4096 -subj /CN=zvezda.bucko.me.uk -nodes -keyout example_key.pem -out example_csr.pem
 # cat example_csr.pem 
 # signed_cert.pem
 # cat > signed_cert.pem
-
-
 
 
 
