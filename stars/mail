@@ -1,0 +1,70 @@
+apt-get install exim4 apache2-utils razor spamassassin
+dpkg-reconfigure exim4-config
+# BOTH: mailname cirno.co.uk
+# ZVEZDA: accept mail for: abhor.co.uk;disambiguate.co.uk;nullify.co.uk;androgynous.co.uk;disillusionment.co.uk;incumbent.co.uk;prehensible.co.uk;avaricious.co.uk;bucko.me.uk;fluorescence.co.uk;cirno.co.uk
+# ZVEZDA: relay mail for:
+# KIRABOSHI: accept mail for:
+# KIRABOSHI: relay mail for: abhor.co.uk;disambiguate.co.uk;nullify.co.uk;androgynous.co.uk;disillusionment.co.uk;incumbent.co.uk;prehensible.co.uk;avaricious.co.uk;bucko.me.uk;fluorescence.co.uk;cirno.co.uk
+
+
+/usr/share/doc/exim4-base/examples/exim-gencert
+vim /etc/exim4/conf.d/auth/30_exim4-config_examples # enable plain auth
+
+htpasswd -nd bucko > /etc/exim4/passwd
+chmod 640 /etc/exim4/passwd
+chgrp Debian-exim /etc/exim4/passwd
+
+adduser --disabled-password bucko-mail
+
+cat <<END >> /etc/aliases
+amiami: bucko
+repo: bucko
+bucko: bucko-mail
+END
+
+# same password in cirno's /etc/exim4/passwd.client
+echo MAIN_TLS_ENABLE = true > /etc/exim4/conf.d/main/00_local_settings
+cat > /etc/exim4/conf.d/router/101_exim4-config_bucko_domains <<END
+### Some things
+
+bucko_domains:
+  debug_print = "R: bucko_domains for $local_part@$domain"
+  domains = abhor.co.uk : disambiguate.co.uk : nullify.co.uk : androgynous.co.uk : disillusionment.co.uk : incumbent.co.uk : prehensible.co.uk : avaricious.co.uk : bucko.me.uk : fluorescence.co.uk
+  driver = accept
+  transport = procmail_pipe_bucko
+
+END
+
+cat > /etc/exim4/conf.d/transport/31_exim4-config_procmail_pipe_bucko <<END
+procmail_pipe_bucko:
+  debug_print = "T: procmail_pipe_bucko for $local_part@$domain"
+  driver = pipe
+  user = bucko-mail
+  path = "/bin:/usr/bin:/usr/local/bin"
+  command = "/usr/bin/procmail -d bucko-mail"
+  return_path_add
+  delivery_date_add
+  envelope_to_add
+
+END
+update-exim4.conf
+service exim4 restart
+
+sed -i '/^[^#].*auth-system\.conf\.ext/s/^/#/; /^#.*auth-passwdfile\.conf\.ext/s/^#//' dovecot/conf.d/10-auth.conf
+sed -i '/args =/s/= [^/]*\//= \//' /etc/dovecot/conf.d/auth-passwdfile.conf.ext
+cat <<END > /etc/dovecot/local.conf
+ssl = required
+protocols = imaps
+disable_plaintext_auth = yes
+mail_privileged_group = mail
+END
+echo "bucko-mail:$(doveadm pw -s SHA512-CRYPT):1005:1005:David Buckley,,,,(Mail):/home/bucko-mail:/bin/bash" > /etc/dovecot/users
+chmod 640 /etc/dovecot/users
+chgrp dovecot /etc/dovecot/users
+ervice dovecot restart
+
+rsync -e 'ssh -p 742' root@elmonstro.bucko.me.uk:/home/bucko/.procmailrc /home/bucko-mail/
+rsync -e 'ssh -p 742' root@elmonstro.bucko.me.uk:/home/bucko/.mail.* /home/bucko-mail/
+rsync -e 'ssh -p 742' root@elmonstro.bucko.me.uk:/home/bucko/bin/whitelist-test /home/bucko-mail/bin/
+chown -R bucko-mail:bucko-mail ~bucko-mail
+# sed all bucko -> bucko-mail
