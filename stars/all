@@ -7,7 +7,7 @@ apt-get install sudo
 apt-get install fail2ban apticron etckeeper
 
 # tolerable-utilities
-apt-get install vim htop less git host whois dnsutils screen bzip2 ncdu dc
+apt-get install vim htop less git host whois dnsutils screen bzip2 ncdu dc iptraf
 
 # timezone (UTC)
 dpkg-reconfigure tzdata
