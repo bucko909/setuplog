@@ -1,0 +1,18 @@
+adduser --disabled-password bucko-mailpile
+apt-get install make build-essential
+apt-get install python-imaging python-lxml python-jinja2 pep8 rubygems ruby-dev yui-compressor python-nose spambayes # from 'make debian-dev'
+gem install therubyracer less
+# ZVEZDA ONLY
+btrfs-add /home/bucko-mailpile
+su - bucko-mailpile
+git clone -b release/alpha https://github.com/pagekite/Mailpile.git
+cd Mailpile
+./mp
+set prefs.rescan_interval = 10
+set profiles.0.email = isreal-mailpile-default@bucko.me.uk
+set profiles.0.name = David Buckley
+add /var/mail/bucko-mailpile
+# END ZVEZDA ONLY
+# TODO:
+# - import mail
+# - systemd startup
