@@ -1,0 +1,5 @@
+sed -i '/^search /d' /etc/resolv.conf
+echo search bucko.me.uk >> /etc/resolv.conf
+. snapshot-tools/btrfs-common
+setup
+for I in zvezda kiraboshi cirno; do setup_ssh $I.bucko.me.uk; ssh -A $I setup_ssh across.bucko.me.uk; done

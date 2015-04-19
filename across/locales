@@ -1,0 +1,2 @@
+sed -i 's/^# en_GB/en_GB/' /etc/locale.gen
+locale-gen

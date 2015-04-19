@@ -1,0 +1,3 @@
+cfdisk # fix sdb -> sdb1 only
+btrfs device add /dev/sdb1 /
+btrfs balance start -dconvert=raid1 -mconvert=raid1 /
