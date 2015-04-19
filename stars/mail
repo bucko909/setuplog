@@ -1,4 +1,4 @@
-apt-get install exim4 apache2-utils razor spamassassin
+apt-get install exim4 apache2-utils razor spamassassin dovecot
 dpkg-reconfigure exim4-config
 # BOTH: mailname cirno.co.uk
 # ZVEZDA: accept mail for: abhor.co.uk;disambiguate.co.uk;nullify.co.uk;androgynous.co.uk;disillusionment.co.uk;incumbent.co.uk;prehensible.co.uk;avaricious.co.uk;bucko.me.uk;fluorescence.co.uk;cirno.co.uk
@@ -50,7 +50,7 @@ END
 update-exim4.conf
 service exim4 restart
 
-sed -i '/^[^#].*auth-system\.conf\.ext/s/^/#/; /^#.*auth-passwdfile\.conf\.ext/s/^#//' dovecot/conf.d/10-auth.conf
+sed -i '/^[^#].*auth-system\.conf\.ext/s/^/#/; /^#.*auth-passwdfile\.conf\.ext/s/^#//' /etc/dovecot/conf.d/10-auth.conf
 sed -i '/args =/s/= [^/]*\//= \//' /etc/dovecot/conf.d/auth-passwdfile.conf.ext
 cat <<END > /etc/dovecot/local.conf
 ssl = required
